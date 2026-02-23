@@ -49,9 +49,9 @@ sha3 = "0.10"
 rand = "0.8"
 
 # Used for GPU proving.
-shivini = "=0.155.2"
-proof-compression = "=0.155.2"
-zksync-gpu-prover = "=0.155.2"
+shivini = "=0.155.8"
+proof-compression = "=0.155.8"
+zksync-gpu-prover = "=0.155.8"
 
 [profile.release.package."blake2_with_compression_verifier"]
 opt-level = 1
