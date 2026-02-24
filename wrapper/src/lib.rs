@@ -395,7 +395,7 @@ pub fn prove_snark_wrapper(
         println!("using zk (padding) proving");
         const NUM_PADDING_TERMS: usize = 2 + 2 + 2; // worst case witness polys are opened at 2 points, plus there are
         // indirect openings of grand product for permutation and for lookup
-        let mut rng = rand::OsRng::new().expect("failed to get OS random generator");
+        let mut rng = rand::rngs::OsRng::default();
         assembly.finalize_to_size_log_2_with_randomization(
             L1_VERIFIER_DOMAIN_SIZE_LOG,
             NUM_PADDING_TERMS,
