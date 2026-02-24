@@ -185,7 +185,7 @@ impl<F: SmallField, V: CircuitLeafInclusionVerifier<F>> CircuitBuilder<F>
         #[cfg(feature = "wrap_with_reduced_log_23")]
         let result = LookupParameters::UseSpecializedColumnsWithTableIdAsConstant {
             width: 3,
-            num_repetitions: 47,
+            num_repetitions: 49,
             share_table_id: true,
         };
 
