@@ -15,7 +15,7 @@ path = "src/main.rs"
 clap.workspace = true
 zkos_verifier_generator.workspace = true
 prover.workspace = true
-execution_utils.workspace = true
+execution_utils = {workspace = true, features = ["verifier_80"]}
 setups.workspace = true
 serde_json.workspace = true
 serde.workspace = true

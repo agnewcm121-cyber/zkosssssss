@@ -196,6 +196,62 @@ impl<F: SmallField> CSAllocatable<F> for WrappedExternalDelegationArgumentChalle
 }
 
 #[derive(Clone, Copy)]
+pub struct WrappedExternalMachineStateArgumentChallenges<F: SmallField> {
+    pub linearization_challenges: [MersenneQuartic<F>; NUM_MACHINE_STATE_LINEARIZATION_CHALLENGES],
+    pub additive_term: MersenneQuartic<F>,
+}
+
+impl<F: SmallField> WrappedExternalMachineStateArgumentChallenges<F> {
+    pub(crate) fn to_uint32_vec(&self) -> Vec<UInt32<F>> {
+        let mut result =
+            Vec::with_capacity(NUM_MACHINE_STATE_LINEARIZATION_CHALLENGES * 4 + 4);
+        for i in 0..NUM_MACHINE_STATE_LINEARIZATION_CHALLENGES {
+            result.extend_from_slice(
+                &self.linearization_challenges[i].into_uint32s(),
+            );
+        }
+        result.extend_from_slice(&self.additive_term.into_uint32s());
+        result
+    }
+
+    pub(crate) fn enforce_equal<CS: ConstraintSystem<F>>(&self, cs: &mut CS, other: &Self) {
+        for i in 0..NUM_MACHINE_STATE_LINEARIZATION_CHALLENGES {
+            self.linearization_challenges[i]
+                .enforce_equal(cs, &other.linearization_challenges[i]);
+        }
+        self.additive_term
+            .enforce_equal(cs, &other.additive_term)
+    }
+}
+
+impl<F: SmallField> CSAllocatable<F> for WrappedExternalMachineStateArgumentChallenges<F> {
+    type Witness = ExternalMachineStateArgumentChallenges;
+
+    fn placeholder_witness() -> Self::Witness {
+        ExternalMachineStateArgumentChallenges {
+            linearization_challenges: [MersenneQuartic::<F>::placeholder_witness(); NUM_MACHINE_STATE_LINEARIZATION_CHALLENGES],
+            additive_term: MersenneQuartic::<F>::placeholder_witness(),
+        }
+    }
+    fn allocate_without_value<CS: ConstraintSystem<F>>(cs: &mut CS) -> Self {
+        Self {
+            linearization_challenges: [(); NUM_MACHINE_STATE_LINEARIZATION_CHALLENGES]
+                .map(|_| MersenneQuartic::allocate_without_value(cs)),
+            additive_term: MersenneQuartic::allocate_without_value(cs),
+        }
+    }
+
+    fn allocate<CS: ConstraintSystem<F>>(cs: &mut CS, witness: Self::Witness) -> Self {
+        Self {
+            linearization_challenges: witness
+                .linearization_challenges
+                .map(|x| MersenneQuartic::allocate(cs, x)),
+            additive_term: MersenneQuartic::allocate(cs, witness.additive_term),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
 pub struct WrappedAuxArgumentsBoundaryValues<F: SmallField> {
     pub lazy_init_first_row: [MersenneField<F>; REGISTER_SIZE],
     pub teardown_value_first_row: [MersenneField<F>; REGISTER_SIZE],
@@ -296,6 +352,7 @@ pub struct WrappedProofOutput<
     const NUM_COSETS: usize,
     const NUM_DELEGATION_CHALLENGES: usize,
     const NUM_AUX_BOUNDARY_VALUES: usize,
+    const NUM_MACHINE_STATE_CHALLENGES: usize = 0,
 > {
     pub setup_caps: [WrappedMerkleTreeCap<F, CAP_SIZE>; NUM_COSETS],
     pub memory_caps: [WrappedMerkleTreeCap<F, CAP_SIZE>; NUM_COSETS],
@@ -303,7 +360,9 @@ pub struct WrappedProofOutput<
     pub delegation_challenges:
         [WrappedExternalDelegationArgumentChallenges<F>; NUM_DELEGATION_CHALLENGES],
     pub lazy_init_boundary_values: [WrappedAuxArgumentsBoundaryValues<F>; NUM_AUX_BOUNDARY_VALUES],
-    pub memory_grand_product_accumulator: MersenneQuartic<F>,
+    pub machine_state_permutation_challenges:
+        [WrappedExternalMachineStateArgumentChallenges<F>; NUM_MACHINE_STATE_CHALLENGES],
+    pub grand_product_accumulator: MersenneQuartic<F>,
     pub delegation_argument_accumulator: [MersenneQuartic<F>; NUM_DELEGATION_CHALLENGES],
     pub circuit_sequence: UInt32<F>,
     pub delegation_type: UInt32<F>,
@@ -315,6 +374,7 @@ impl<
     const NUM_COSETS: usize,
     const NUM_DELEGATION_CHALLENGES: usize,
     const NUM_AUX_BOUNDARY_VALUES: usize,
+    const NUM_MACHINE_STATE_CHALLENGES: usize,
 > CSAllocatable<F>
     for WrappedProofOutput<
         F,
@@ -322,10 +382,11 @@ impl<
         NUM_COSETS,
         NUM_DELEGATION_CHALLENGES,
         NUM_AUX_BOUNDARY_VALUES,
+        NUM_MACHINE_STATE_CHALLENGES
     >
 {
     type Witness =
-        ProofOutput<CAP_SIZE, NUM_COSETS, NUM_DELEGATION_CHALLENGES, NUM_AUX_BOUNDARY_VALUES>;
+        ProofOutput<CAP_SIZE, NUM_COSETS, NUM_DELEGATION_CHALLENGES, NUM_AUX_BOUNDARY_VALUES, NUM_MACHINE_STATE_CHALLENGES>;
 
     fn placeholder_witness() -> Self::Witness {
         ProofOutput {
@@ -337,7 +398,9 @@ impl<
                     NUM_DELEGATION_CHALLENGES],
             lazy_init_boundary_values: [WrappedAuxArgumentsBoundaryValues::<F>::placeholder_witness(
             ); NUM_AUX_BOUNDARY_VALUES],
-            memory_grand_product_accumulator: Mersenne31Quartic::ZERO,
+            machine_state_permutation_challenges: [WrappedExternalMachineStateArgumentChallenges::<F>::placeholder_witness();
+                NUM_MACHINE_STATE_CHALLENGES],
+            grand_product_accumulator: Mersenne31Quartic::ZERO,
             delegation_argument_accumulator: [Mersenne31Quartic::ZERO; NUM_DELEGATION_CHALLENGES],
             circuit_sequence: 0u32,
             delegation_type: 0u32,
@@ -352,7 +415,9 @@ impl<
                 .map(|_| WrappedExternalDelegationArgumentChallenges::allocate_without_value(cs)),
             lazy_init_boundary_values: [(); NUM_AUX_BOUNDARY_VALUES]
                 .map(|_| WrappedAuxArgumentsBoundaryValues::allocate_without_value(cs)),
-            memory_grand_product_accumulator: MersenneQuartic::allocate_without_value(cs),
+            machine_state_permutation_challenges: [(); NUM_MACHINE_STATE_CHALLENGES]
+                .map(|_| WrappedExternalMachineStateArgumentChallenges::allocate_without_value(cs)),
+            grand_product_accumulator: MersenneQuartic::allocate_without_value(cs),
             delegation_argument_accumulator: [(); NUM_DELEGATION_CHALLENGES]
                 .map(|_| MersenneQuartic::allocate_without_value(cs)),
             circuit_sequence: UInt32::allocate_without_value(cs),
@@ -374,12 +439,15 @@ impl<
             delegation_challenges: witness
                 .delegation_challenges
                 .map(|x| WrappedExternalDelegationArgumentChallenges::allocate(cs, x)),
+            machine_state_permutation_challenges: witness
+                .machine_state_permutation_challenges
+                .map(|x| WrappedExternalMachineStateArgumentChallenges::allocate(cs, x)),
             lazy_init_boundary_values: witness
                 .lazy_init_boundary_values
                 .map(|x| WrappedAuxArgumentsBoundaryValues::allocate(cs, x)),
-            memory_grand_product_accumulator: MersenneQuartic::allocate(
+            grand_product_accumulator: MersenneQuartic::allocate(
                 cs,
-                witness.memory_grand_product_accumulator,
+                witness.grand_product_accumulator,
             ),
             delegation_argument_accumulator: witness
                 .delegation_argument_accumulator
@@ -391,7 +459,7 @@ impl<
 }
 
 pub struct WrappedProofAuxValues<F: SmallField> {
-    pub memory_grand_product_accumulator_final_value: MersenneQuartic<F>,
+    pub grand_product_accumulator_final_value: MersenneQuartic<F>,
     pub delegation_argument_accumulator_sum: MersenneQuartic<F>,
 }
 

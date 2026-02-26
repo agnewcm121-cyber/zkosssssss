@@ -16,8 +16,7 @@ boojum.workspace = true
 bellman.workspace = true
 rescue_poseidon.workspace = true
 snark_wrapper.workspace = true
-reduced_risc_verifier.workspace = true
-final_risc_verifier.workspace = true
+unified_reduced_machine_verifier.workspace = true
 blake_verifier.workspace = true
 execution_utils.workspace = true
 setups.workspace = true
@@ -27,10 +26,9 @@ serde.workspace = true
 clap.workspace = true
 sha3.workspace = true
 
-
-shivini = { workspace = true, optional = true } 
-proof-compression = {workspace = true, optional = true}
-zksync-gpu-prover = {workspace = true, optional = true}
+# shivini = { workspace = true, optional = true } 
+# proof-compression = {workspace = true, optional = true}
+# zksync-gpu-prover = {workspace = true, optional = true}
 
 [dev-dependencies]
 rand.workspace = true
@@ -38,8 +36,7 @@ hex = "0.4.3"
 libc = "0.2.175"
 
 [features]
-
-default = ["wrap_with_reduced_log_23"]
-wrap_final_machine = []
-wrap_with_reduced_log_23 = []
-gpu = ["shivini", "proof-compression", "zksync-gpu-prover"]
+# gpu = ["shivini", "proof-compression", "zksync-gpu-prover"]
+security_80 = ["unified_reduced_machine_verifier/security_80", "blake_verifier/security_80", "execution_utils/verifier_80"]
+security_100 = ["unified_reduced_machine_verifier/security_100", "blake_verifier/security_100", "execution_utils/verifier_100"]
+default = ["security_80"]

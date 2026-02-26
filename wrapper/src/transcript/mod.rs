@@ -2,6 +2,7 @@ use boojum::cs::traits::cs::ConstraintSystem;
 use boojum::field::SmallField;
 use boojum::gadgets::blake2s::mixing_function::Word;
 use boojum::gadgets::traits::allocatable::CSAllocatable;
+use boojum::gadgets::traits::witnessable::WitnessHookable;
 use boojum::gadgets::u8::UInt8;
 use boojum::gadgets::u16::UInt16;
 use boojum::gadgets::u32::UInt32;
@@ -202,13 +203,12 @@ impl Blake2sWrappedTranscript {
     pub fn verify_pow_using_hasher<
         F: SmallField,
         CS: ConstraintSystem<F>,
-        const POW_BITS: usize,
     >(
         cs: &mut CS,
         hasher: &mut Blake2sStateGate<F>,
         seed: &mut SeedWrapped<F>,
         nonce: [UInt32<F>; 2],
-        // pow_bits: u32,
+        pow_bits: u32,
     ) {
         hasher.reset();
         // first we can just take values from the seed
@@ -235,17 +235,26 @@ impl Blake2sWrappedTranscript {
         );
 
         // check that first element is small enough assert!(hasher.state[0] <= (0xffffffff >> pow_bits));
-        assert!(POW_BITS > 16);
-        let zero = UInt8::zero(cs);
-        let first_el_high_0 = hasher.extended_state[0].inner[2];
-        let first_el_high_1 = hasher.extended_state[0].inner[3];
-        let _ = zero.sub_no_overflow(cs, first_el_high_0);
-        let _ = zero.sub_no_overflow(cs, first_el_high_1);
-        let first_el_low =
-            UInt16::from_le_bytes(cs, hasher.extended_state[0].inner[..2].try_into().unwrap());
-        let pow_bits_mask = (0xffffffff as u32 >> POW_BITS) as u16;
-        let pow_bits_mask = UInt16::allocated_constant(cs, pow_bits_mask);
-        let _ = pow_bits_mask.sub_no_overflow(cs, first_el_low);
+        if pow_bits > 16 {
+            let zero = UInt8::zero(cs);
+            let first_el_high_0 = hasher.extended_state[0].inner[2];
+            let first_el_high_1 = hasher.extended_state[0].inner[3];
+            let _ = zero.sub_no_overflow(cs, first_el_high_0);
+            let _ = zero.sub_no_overflow(cs, first_el_high_1);
+            let first_el_low =
+                UInt16::from_le_bytes(cs, hasher.extended_state[0].inner[..2].try_into().unwrap());
+            let pow_bits_mask = (0xffffffff as u32 >> pow_bits) as u16;
+            let pow_bits_mask = UInt16::allocated_constant(cs, pow_bits_mask);
+            let _ = pow_bits_mask.sub_no_overflow(cs, first_el_low);
+        } else {
+            let first_el_high = UInt16::from_le_bytes(
+                cs,
+                hasher.extended_state[0].inner[2..].try_into().unwrap(),
+            );
+            let pow_bits_mask = (0xffff as u32 >> pow_bits) as u16;
+            let pow_bits_mask = UInt16::allocated_constant(cs, pow_bits_mask);
+            let _ = pow_bits_mask.sub_no_overflow(cs, first_el_high);
+        }
 
         // copy it out
         *seed = SeedWrapped(hasher.read_state_for_output());

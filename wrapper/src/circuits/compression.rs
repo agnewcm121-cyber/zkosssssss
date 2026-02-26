@@ -23,16 +23,26 @@ use crate::*;
 pub struct CompressionCircuit {
     pub witness: Option<RiscWrapperProof>,
     pub vk: RiscWrapperVK,
-    // pub transcript_params: <TR as Transcript<GL>>::TransciptParameters,
 }
 
 impl CircuitBuilder<GL> for CompressionCircuit {
     fn geometry() -> CSGeometry {
-        CSGeometry {
-            num_columns_under_copy_permutation: 52,
-            num_witness_columns: 78,
-            num_constant_columns: 4,
-            max_allowed_constraint_degree: 8,
+        if cfg!(feature = "security_80") {
+            CSGeometry {
+                num_columns_under_copy_permutation: 51,
+                num_witness_columns: 79,
+                num_constant_columns: 4,
+                max_allowed_constraint_degree: 8,
+            }
+        } else if cfg!(feature = "security_100") {
+            CSGeometry {
+                num_columns_under_copy_permutation: 65,
+                num_witness_columns: 65,
+                num_constant_columns: 4,
+                max_allowed_constraint_degree: 8,
+            }
+        } else {
+            panic!("Security level not supported");
         }
     }
 

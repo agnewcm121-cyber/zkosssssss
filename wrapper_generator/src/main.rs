@@ -2,29 +2,25 @@
 #![feature(slice_from_ptr_range)]
 #![feature(allocator_api)]
 
-mod everywhere_except_last;
-mod everywhere_except_last_two;
-mod first_or_last_rows;
-mod memory_accumulators;
-mod quotient_generator;
-
-mod utils;
-
 use clap::Parser;
 use prover::{cs::one_row_compiler::CompiledCircuitArtifact, field::Mersenne31Field};
-use quotient_generator::generate_inlined;
 use std::io::Write;
 use std::path::Path;
 use std::process::Command;
 use std::process::Stdio;
-use zkos_verifier_generator::generate_from_parts;
+use zkos_verifier_generator::{generate_from_parts, generate_inlined_configured};
+
+mod mersenne_wrapper;
+use mersenne_wrapper::MersenneBoojumWrapper;
 
 /// Returns formatted rust code with verifier and inline verifier files.
 fn generate_verifier_files(circuit: &CompiledCircuitArtifact<Mersenne31Field>) -> (String, String) {
     let verifier = format_rust_code(&generate_from_parts(&circuit).to_string()).unwrap();
 
-    let inlined_verifier =
-        format_rust_code(&generate_inlined(circuit.clone()).to_string()).unwrap();
+    let inlined_verifier = format_rust_code(
+        &generate_inlined_configured::<MersenneBoojumWrapper>(circuit.clone()).to_string(),
+    )
+    .unwrap();
 
     (verifier, inlined_verifier)
 }
@@ -65,9 +61,9 @@ fn format_rust_code(code: &str) -> Result<String, String> {
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 struct Cli {
-    #[arg(long, default_value = "wrapper/src/wrapper_inner_verifier/imports")]
+    #[arg(long, default_value = "../wrapper/src/inner_verifiers/unified_reduced/imports")]
     output_dir: String,
-    #[arg(long, default_value = "wrapper/src/blake2_inner_verifier/imports")]
+    #[arg(long, default_value = "../wrapper/src/inner_verifiers/blake_delegation/imports")]
     blake_output_dir: String,
 }
 
@@ -76,29 +72,8 @@ fn main() {
     let output_dir = cli.output_dir;
     let blake_output_dir = cli.blake_output_dir;
 
-    let dummy_bytecode = vec![0u32; setups::final_reduced_risc_v_machine::MAX_ROM_SIZE / 4];
-    let compiled_circuit = setups::final_reduced_risc_v_machine::get_machine(
-        &dummy_bytecode,
-        setups::final_reduced_risc_v_machine::ALLOWED_DELEGATION_CSRS,
-    );
-
-    let (verifier, inline_verifier) = generate_verifier_files(&compiled_circuit);
-    std::fs::write(
-        Path::new(&output_dir).join("circuit_layout_for_final_machine.rs"),
-        verifier,
-    )
-    .expect(&format!("Failed to write to {}", output_dir));
-    std::fs::write(
-        Path::new(&output_dir).join("circuit_quotient_for_final_machine.rs"),
-        inline_verifier,
-    )
-    .expect(&format!("Failed to write to {}", output_dir));
-
-    let dummy_bytecode = vec![0u32; setups::reduced_risc_v_log_23_machine::MAX_ROM_SIZE / 4];
-    let compiled_circuit = setups::reduced_risc_v_log_23_machine::get_machine(
-        &dummy_bytecode,
-        setups::reduced_risc_v_log_23_machine::ALLOWED_DELEGATION_CSRS,
-    );
+    let dummy_bytecode = vec![0u32; setups::unified_reduced_machine::MAX_ROM_SIZE / 4];
+    let compiled_circuit = setups::unified_reduced_machine::get_circuit(&dummy_bytecode);
 
     let (verifier, inline_verifier) = generate_verifier_files(&compiled_circuit);
     std::fs::write(Path::new(&output_dir).join("circuit_layout.rs"), verifier)

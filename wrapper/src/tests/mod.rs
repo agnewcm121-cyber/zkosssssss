@@ -1,8 +1,9 @@
 use crate::risc_verifier;
 use crate::transcript::*;
-use crate::wrapper_inner_verifier::skeleton::*;
+use crate::inner_verifiers::unified_reduced::skeleton::*;
 use crate::wrapper_utils::verifier_traits::CircuitBlake2sForEverythingVerifier;
 use crate::wrapper_utils::verifier_traits::CircuitLeafInclusionVerifier;
+use crate::{deserialize_from_file, serialize_to_file};
 use boojum::cs::LookupParameters;
 use boojum::cs::gates::FmaGateInBaseFieldWithoutConstant;
 use boojum::cs::gates::NopGate;
@@ -18,7 +19,7 @@ use boojum::{
         gates::{ConstantsAllocatorGate, ReductionGate, U32TriAddCarryAsChunkGate, UIntXAddGate},
         traits::{cs::ConstraintSystem, gate::GatePlacementStrategy},
     },
-    dag::CircuitResolverOpts,
+    dag::{StCircuitResolver, CircuitResolverOpts},
     gadgets::blake2s::mixing_function::Word,
     gadgets::{
         tables::{
@@ -30,6 +31,7 @@ use boojum::{
     },
 };
 use risc_verifier::prover::prover_stages::Proof as RiscProof;
+use risc_verifier::prover::prover_stages::unrolled_prover::UnrolledModeProof as RiscUnrolledProof;
 use std::alloc::Global;
 
 use risc_verifier::concrete::size_constants::*;
@@ -41,6 +43,7 @@ type F = boojum::field::goldilocks::GoldilocksField;
 mod blake2s_tests;
 mod compression_tests;
 mod risc_wrapper_tests;
+mod size_estimator;
 mod snark_wrapper_tests;
 
 #[test]
@@ -67,46 +70,29 @@ fn all_layers_setup_test() {
     snark_wrapper_tests::snark_wrapper_setup_test();
 }
 
-// To regenerate this test data (which must happen every time something changes in the verifier)
-// please run (from the zksync-airbender - and make sure to match the current dependency):
-// Make sure that you have a machine with >140GB of RAM for this step:
-// cargo run -p cli --release prove --bin examples/hashed_fibonacci/app.bin --input-file examples/hashed_fibonacci/input.txt --output-dir /tmp/ --until final-proof
-// And then copy /tmp/final_program_proof testing_data/risc_final_machine_proof
+pub(crate) const RISC_PROGRAM_BIN_PATH: &str = "testing_data/risc_app.bin";
+pub(crate) const RISC_PROGRAM_TEXT_PATH: &str = "testing_data/risc_app.text";
 
-#[cfg(feature = "wrap_final_machine")]
+#[cfg(feature = "security_80")]
 mod path_constants {
-    pub(crate) const RISC_PROOF_PATH: &str = "testing_data/risc_final_machine_proof";
-    pub(crate) const RISC_WRAPPER_PROOF_PATH: &str =
-        "testing_data/final_machine_mode_risc_wrapper_proof";
-    pub(crate) const RISC_WRAPPER_VK_PATH: &str = "testing_data/final_machine_mode_risc_wrapper_vk";
-    pub(crate) const COMPRESSION_PROOF_PATH: &str =
-        "testing_data/final_machine_mode_compression_proof";
-    pub(crate) const COMPRESSION_VK_PATH: &str = "testing_data/final_machine_mode_compression_vk";
-    pub(crate) const SNARK_WRAPPER_PROOF_PATH: &str =
-        "testing_data/final_machine_mode_snark_wrapper_proof";
-    pub(crate) const SNARK_WRAPPER_VK_PATH: &str =
-        "testing_data/final_machine_mode_snark_wrapper_vk";
+    pub(crate) const RISC_PROOF_PATH: &str = "testing_data/risc_proof_80sb";
+    pub(crate) const RISC_WRAPPER_PROOF_PATH: &str = "testing_data/risc_wrapper_proof_80sb";
+    pub(crate) const RISC_WRAPPER_VK_PATH: &str = "testing_data/risc_wrapper_vk_80sb";
+    pub(crate) const COMPRESSION_PROOF_PATH: &str = "testing_data/compression_proof_80sb";
+    pub(crate) const COMPRESSION_VK_PATH: &str = "testing_data/compression_vk_80sb";
+    pub(crate) const SNARK_WRAPPER_PROOF_PATH: &str = "testing_data/snark_wrapper_proof_80sb";
+    pub(crate) const SNARK_WRAPPER_VK_PATH: &str = "testing_data/snark_wrapper_vk_80sb";
 }
 
-#[cfg(feature = "wrap_with_reduced_log_23")]
+#[cfg(feature = "security_100")]
 mod path_constants {
-    pub(crate) const RISC_PROOF_PATH: &str = "testing_data/risc_proof";
-    pub(crate) const RISC_WRAPPER_PROOF_PATH: &str = "testing_data/risc_wrapper_proof";
-    pub(crate) const RISC_WRAPPER_VK_PATH: &str = "testing_data/risc_wrapper_vk";
-    pub(crate) const COMPRESSION_PROOF_PATH: &str = "testing_data/compression_proof";
-    pub(crate) const COMPRESSION_VK_PATH: &str = "testing_data/compression_vk";
-    pub(crate) const SNARK_WRAPPER_PROOF_PATH: &str = "testing_data/snark_wrapper_proof";
-    pub(crate) const SNARK_WRAPPER_VK_PATH: &str = "testing_data/snark_wrapper_vk";
+    pub(crate) const RISC_PROOF_PATH: &str = "testing_data/risc_proof_100sb";
+    pub(crate) const RISC_WRAPPER_PROOF_PATH: &str = "testing_data/risc_wrapper_proof_100sb";
+    pub(crate) const RISC_WRAPPER_VK_PATH: &str = "testing_data/risc_wrapper_vk_100sb";
+    pub(crate) const COMPRESSION_PROOF_PATH: &str = "testing_data/compression_proof_100sb";
+    pub(crate) const COMPRESSION_VK_PATH: &str = "testing_data/compression_vk_100sb";
+    pub(crate) const SNARK_WRAPPER_PROOF_PATH: &str = "testing_data/snark_wrapper_proof_100sb";
+    pub(crate) const SNARK_WRAPPER_VK_PATH: &str = "testing_data/snark_wrapper_vk_100sb";
 }
 
 use path_constants::*;
-
-fn deserialize_from_file<T: serde::de::DeserializeOwned>(filename: &str) -> T {
-    let src = std::fs::File::open(filename).unwrap();
-    serde_json::from_reader(src).unwrap()
-}
-
-fn serialize_to_file<T: serde::ser::Serialize>(content: &T, filename: &str) {
-    let src = std::fs::File::create(filename).unwrap();
-    serde_json::to_writer_pretty(src, content).unwrap();
-}

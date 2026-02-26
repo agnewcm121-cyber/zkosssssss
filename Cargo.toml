@@ -19,25 +19,43 @@ categories = ["cryptography"]
 
 circuit_mersenne_field = { path = "circuit_mersenne_field" }
 
-boojum = { version = "=0.32.5", features = ["log_tracing"] }
-bellman = { package = "zksync_bellman", version = "=0.32.5" }
-rescue_poseidon = "=0.32.5"
-snark_wrapper = "=0.32.5"
+# boojum = { version = "=0.32.5", features = ["log_tracing"] }
+# bellman = { package = "zksync_bellman", version = "=0.32.5" }
+# rescue_poseidon = "=0.32.5"
+# snark_wrapper = "=0.32.5"
 
-final_risc_verifier = { git = "https://github.com/matter-labs/zksync-airbender.git", package = "final_reduced_risc_v_machine_verifier", features = [
-    "proof_utils",
-], tag = "v0.5.1" }
-reduced_risc_verifier = { git = "https://github.com/matter-labs/zksync-airbender.git", package = "reduced_risc_v_log_23_machine_verifier", features = [
-    "proof_utils",
-], tag = "v0.5.1" }
+boojum = { git = "https://github.com/matter-labs/zksync-crypto.git", package = "boojum", branch = "oh_unpin_compiler_version" }
+bellman = { git = "https://github.com/matter-labs/zksync-crypto.git", package = "zksync_bellman", branch = "oh_unpin_compiler_version" }
+rescue_poseidon = { git = "https://github.com/matter-labs/zksync-crypto.git", package = "rescue_poseidon", branch = "oh_unpin_compiler_version" }
+snark_wrapper = { git = "https://github.com/matter-labs/zksync-crypto.git", package = "snark_wrapper", branch = "oh_unpin_compiler_version" }
+
+unified_reduced_machine_verifier = { git = "https://github.com/matter-labs/zksync-airbender.git", package = "unified_reduced_machine_verifier", features = [
+    "proof_utils", "blake2_with_compression"
+], default-features = false, branch = "oh_for_wrapper" }
 blake_verifier = { git = "https://github.com/matter-labs/zksync-airbender.git", package = "blake2_with_compression_verifier", features = [
-    "proof_utils",
-], tag = "v0.5.1" }
-execution_utils = { git = "https://github.com/matter-labs/zksync-airbender.git", package = "execution_utils", tag = "v0.5.1" }
-setups = { git = "https://github.com/matter-labs/zksync-airbender.git", package = "setups", tag = "v0.5.1" }
-mersenne_field = { git = "https://github.com/matter-labs/zksync-airbender.git", package = "field", tag = "v0.5.1" }
-zkos_verifier_generator = { git = "https://github.com/matter-labs/zksync-airbender.git", package = "verifier_generator", tag = "v0.5.1" }
-prover = { git = "https://github.com/matter-labs/zksync-airbender.git", package = "prover", tag = "v0.5.1" }
+    "proof_utils", "blake2_with_compression"
+], default-features = false, branch = "oh_for_wrapper" }
+execution_utils = { git = "https://github.com/matter-labs/zksync-airbender.git", package = "execution_utils", features = [
+    "prover"
+], default-features = false, branch = "oh_for_wrapper" }
+setups = { git = "https://github.com/matter-labs/zksync-airbender.git", package = "setups", branch = "oh_for_wrapper" }
+mersenne_field = { git = "https://github.com/matter-labs/zksync-airbender.git", package = "field", branch = "oh_for_wrapper" }
+zkos_verifier_generator = { git = "https://github.com/matter-labs/zksync-airbender.git", package = "verifier_generator", branch = "oh_for_wrapper" }
+prover = { git = "https://github.com/matter-labs/zksync-airbender.git", package = "prover", branch = "oh_for_wrapper" }
+
+# unified_reduced_machine_verifier = { path = "../zksync-airbender/circuit_defs/unrolled_circuits/unified_reduced_machine/verifier", features = [
+#     "proof_utils", "blake2_with_compression"
+# ], default-features = false}
+# blake_verifier = { path = "../zksync-airbender/circuit_defs/blake2_with_compression/verifier", package = "blake2_with_compression_verifier", features = [
+#     "proof_utils", "blake2_with_compression"
+# ], default-features = false}
+# execution_utils = { path = "../zksync-airbender/execution_utils", package = "execution_utils", features = [
+#     "prover"
+# ], default-features = false}
+# setups = { path = "../zksync-airbender/circuit_defs/setups", package = "setups"}
+# mersenne_field = { path = "../zksync-airbender/field", package = "field"}
+# zkos_verifier_generator = { path = "../zksync-airbender/verifier_generator", package = "verifier_generator"}
+# prover = { path = "../zksync-airbender/prover", package = "prover"}
 
 serde_json = { version = "*" }
 serde = { version = "1", default-features = false, features = [
@@ -57,6 +75,9 @@ zksync-gpu-prover = "=0.155.2"
 opt-level = 1
 codegen-units = 256
 overflow-checks = true
+
+[profile.release.package."zkos-wrapper"]
+opt-level = 2
 
 [profile.release]
 lto = false

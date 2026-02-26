@@ -1,3 +1,5 @@
+use boojum::gadgets::traits::witnessable::WitnessHookable;
+
 use super::*;
 
 #[derive(Clone, Copy)]
@@ -92,7 +94,7 @@ impl<F: SmallField> CircuitLeafInclusionVerifier<F> for CircuitBlake2sForEveryth
         let mut num_full_rounds = input_len_words / BLAKE2S_BLOCK_SIZE_U32_WORDS;
         let mut last_round_len = input_len_words % BLAKE2S_BLOCK_SIZE_U32_WORDS;
         if last_round_len == 0 {
-            if num_full_rounds > 1 {
+            if num_full_rounds > 0 {
                 num_full_rounds -= 1;
             }
             last_round_len = BLAKE2S_BLOCK_SIZE_U32_WORDS;
@@ -122,7 +124,6 @@ impl<F: SmallField> CircuitLeafInclusionVerifier<F> for CircuitBlake2sForEveryth
                     );
                 src_ptr = src_ptr.add(BLAKE2S_BLOCK_SIZE_U32_WORDS);
             }
-
             // last round unrolled padding
             {
                 let input_slice = core::slice::from_raw_parts(src_ptr, last_round_len);

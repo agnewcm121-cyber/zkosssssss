@@ -2,10 +2,9 @@
 #![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 
-mod blake2_inner_verifier;
+mod inner_verifiers;
 pub mod circuits;
 pub mod transcript;
-mod wrapper_inner_verifier;
 pub mod wrapper_utils;
 
 #[cfg(feature = "gpu")]
@@ -14,10 +13,9 @@ pub mod gpu;
 #[cfg(test)]
 mod tests;
 
-#[cfg(feature = "wrap_final_machine")]
-pub use final_risc_verifier as risc_verifier;
-#[cfg(feature = "wrap_with_reduced_log_23")]
-pub use reduced_risc_verifier as risc_verifier;
+use boojum::cs::implementations::witness;
+use boojum::field::U64Representable;
+pub use unified_reduced_machine_verifier as risc_verifier;
 
 use bellman::rand;
 use boojum::algebraic_props::round_function::AbsorptionModeOverwrite;
@@ -39,6 +37,7 @@ use boojum::cs::implementations::verifier::VerificationKey;
 use boojum::cs::oracle::merkle_tree::MerkleTreeWithCap;
 use boojum::cs::traits::circuit::CircuitBuilder;
 use boojum::cs::traits::circuit::CircuitBuilderProxy;
+use boojum::dag::StCircuitResolver;
 use boojum::gadgets::recursion::recursive_transcript::CircuitAlgebraicSpongeBasedTranscript;
 use boojum::gadgets::recursion::recursive_tree_hasher::CircuitGoldilocksPoseidon2Sponge;
 use boojum::implementations::poseidon2::Poseidon2Goldilocks;
@@ -105,7 +104,11 @@ pub type SnarkWrapperSetup =
 pub type SnarkWrapperTranscript =
     bellman::plonk::commitments::transcript::keccak_transcript::RollingKeccakTranscript<Fr>;
 
-use execution_utils::{ProgramProof, RecursionStrategy, generate_constants_for_binary};
+use execution_utils::{ProgramProof,
+    // RecursionStrategy,
+    // generate_constants_for_binary
+};
+
 #[cfg(feature = "gpu")]
 use proof_compression::serialization::PlonkSnarkVerifierCircuitDeviceSetupWrapper;
 
@@ -128,7 +131,7 @@ pub fn get_risc_wrapper_setup(
     let geometry = RiscWrapper::geometry();
     let (max_trace_len, num_vars) = circuit.size_hint();
 
-    let builder_impl = CsReferenceImplementationBuilder::<GL, GL, SetupCSConfig>::new(
+    let builder_impl = CsReferenceImplementationBuilder::<GL, GL, SetupCSConfig, StCircuitResolver<_, _>>::new(
         geometry,
         max_trace_len.unwrap(),
     );
@@ -146,6 +149,7 @@ pub fn get_risc_wrapper_setup(
         ..
     } = RiscWrapper::get_proof_config();
     let cs = cs.into_assembly::<Global>();
+    cs.print_gate_stats();
 
     let (setup_base, setup, vk, setup_tree, vars_hint, witness_hints) =
         cs.get_full_setup::<RiscWrapperTreeHasher>(worker, fri_lde_factor, merkle_tree_cap_size);
@@ -183,7 +187,8 @@ pub fn prove_risc_wrapper(
     let geometry = RiscWrapper::geometry();
     let (max_trace_len, num_vars) = circuit.size_hint();
 
-    let builder_impl = CsReferenceImplementationBuilder::<GL, GL, ProvingCSConfig>::new(
+    use boojum::config::DevCSConfig;
+    let builder_impl = CsReferenceImplementationBuilder::<GL, GL, DevCSConfig, StCircuitResolver<_, _>>::new(
         geometry,
         max_trace_len.unwrap(),
     );
@@ -194,7 +199,16 @@ pub fn prove_risc_wrapper(
     circuit.add_tables(&mut cs);
     circuit.synthesize_into_cs(&mut cs);
     cs.pad_and_shrink_using_hint(finalization_hint);
-    let cs = cs.into_assembly::<Global>();
+    let mut cs = cs.into_assembly::<Global>();
+    dbg!(cs.check_if_satisfied(&worker));
+    cs.print_gate_stats();
+
+    dbg!(cs.lookup_multiplicities.len());
+
+    for mul in &cs.lookup_multiplicities {
+        dbg!(mul.len());
+    }
+    let witness_vec = cs.witness.as_ref().unwrap().all_values.clone();
 
     let proof_config = RiscWrapper::get_proof_config();
 
@@ -236,7 +250,7 @@ pub fn get_compression_setup(
     let geometry = CompressionCircuit::geometry();
     let (max_trace_len, num_vars) = circuit.size_hint();
 
-    let builder_impl = CsReferenceImplementationBuilder::<GL, GL, SetupCSConfig>::new(
+    let builder_impl = CsReferenceImplementationBuilder::<GL, GL, SetupCSConfig, StCircuitResolver<_, _>>::new(
         geometry,
         max_trace_len.unwrap(),
     );
@@ -290,7 +304,7 @@ pub fn prove_compression(
     let geometry = CompressionCircuit::geometry();
     let (max_trace_len, num_vars) = circuit.size_hint();
 
-    let builder_impl = CsReferenceImplementationBuilder::<GL, GL, ProvingCSConfig>::new(
+    let builder_impl = CsReferenceImplementationBuilder::<GL, GL, ProvingCSConfig, StCircuitResolver<_, _>>::new(
         geometry,
         max_trace_len.unwrap(),
     );
@@ -395,7 +409,7 @@ pub fn prove_snark_wrapper(
         println!("using zk (padding) proving");
         const NUM_PADDING_TERMS: usize = 2 + 2 + 2; // worst case witness polys are opened at 2 points, plus there are
         // indirect openings of grand product for permutation and for lookup
-        let mut rng = rand::OsRng::new().expect("failed to get OS random generator");
+        let mut rng = rand::rngs::OsRng;
         assembly.finalize_to_size_log_2_with_randomization(
             L1_VERIFIER_DOMAIN_SIZE_LOG,
             NUM_PADDING_TERMS,
@@ -496,12 +510,13 @@ pub fn get_trusted_setup(crs_file_str: &String) -> Crs<Bn256, CrsForMonomialForm
     Crs::read(&crs_file).expect(format!("Trying to read CRS FILE: {:?}", crs_file_path).as_str())
 }
 
-pub fn serialize_to_file<T: serde::ser::Serialize>(content: &T, filename: &Path) {
+pub fn serialize_to_file<T: serde::ser::Serialize>(content: &T, filename: &str) {
     let src = std::fs::File::create(filename).unwrap();
     serde_json::to_writer_pretty(src, content).unwrap();
 }
 
 pub fn deserialize_from_file<T: serde::de::DeserializeOwned>(filename: &str) -> T {
+    dbg!(filename);
     let src = std::fs::File::open(filename).unwrap();
     serde_json::from_reader(src).unwrap()
 }
@@ -634,239 +649,234 @@ pub fn prove_risc_wrapper_with_snark(
     }
 }
 
-pub fn prove_fri_risc_wrapper(
-    program_proof: ProgramProof,
-) -> Result<(RiscWrapperProof, RiscWrapperVK), Box<dyn std::error::Error>> {
-    println!("=== Phase 1: Creating the Risc wrapper proof");
+// pub fn prove_fri_risc_wrapper(
+//     program_proof: ProgramProof,
+// ) -> Result<(RiscWrapperProof, RiscWrapperVK), Box<dyn std::error::Error>> {
+//     println!("=== Phase 1: Creating the Risc wrapper proof");
 
-    let worker = boojum::worker::Worker::new();
+//     let worker = boojum::worker::Worker::new();
 
-    let binary_commitment = BinaryCommitment {
-        end_params: program_proof.end_params,
-        aux_params: program_proof
-            .recursion_chain_hash
-            .expect("Recursion chain hash is missing only in base layer"),
-    };
-    let risc_wrapper_witness =
-        RiscWrapperWitness::from_full_proof(program_proof, &binary_commitment);
+//     let binary_commitment = BinaryCommitment {
+//         end_params: program_proof.end_params,
+//         aux_params: program_proof
+//             .recursion_chain_hash
+//             .expect("Recursion chain hash is missing only in base layer"),
+//     };
+//     let risc_wrapper_witness =
+//         RiscWrapperWitness::from_full_proof(program_proof, &binary_commitment);
 
-    #[cfg(feature = "gpu")]
-    let (risc_wrapper_proof, risc_wrapper_vk) = {
-        let (setup, risc_wrapper_vk, finalization_hint) =
-            crate::gpu::risc_wrapper::get_risc_wrapper_setup(&worker, binary_commitment);
-        let risc_wrapper_proof = crate::gpu::risc_wrapper::prove_risc_wrapper(
-            risc_wrapper_witness,
-            &finalization_hint,
-            &setup,
-            &risc_wrapper_vk,
-            &worker,
-            binary_commitment,
-        );
-        (risc_wrapper_proof, risc_wrapper_vk)
-    };
+//     #[cfg(feature = "gpu")]
+//     let (risc_wrapper_proof, risc_wrapper_vk) = {
+//         let (setup, risc_wrapper_vk, finalization_hint) =
+//             crate::gpu::risc_wrapper::get_risc_wrapper_setup(&worker, binary_commitment);
+//         let risc_wrapper_proof = crate::gpu::risc_wrapper::prove_risc_wrapper(
+//             risc_wrapper_witness,
+//             &finalization_hint,
+//             &setup,
+//             &risc_wrapper_vk,
+//             &worker,
+//             binary_commitment,
+//         );
+//         (risc_wrapper_proof, risc_wrapper_vk)
+//     };
 
-    #[cfg(not(feature = "gpu"))]
-    let (risc_wrapper_proof, risc_wrapper_vk) = {
-        let (
-            finalization_hint,
-            setup_base,
-            setup,
-            risc_wrapper_vk,
-            setup_tree,
-            vars_hint,
-            witness_hints,
-        ) = get_risc_wrapper_setup(&worker, binary_commitment.clone());
+//     #[cfg(not(feature = "gpu"))]
+//     let (risc_wrapper_proof, risc_wrapper_vk) = {
+//         let (
+//             finalization_hint,
+//             setup_base,
+//             setup,
+//             risc_wrapper_vk,
+//             setup_tree,
+//             vars_hint,
+//             witness_hints,
+//         ) = get_risc_wrapper_setup(&worker, binary_commitment.clone());
 
-        let risc_wrapper_proof = prove_risc_wrapper(
-            risc_wrapper_witness,
-            &finalization_hint,
-            &setup_base,
-            &setup,
-            &risc_wrapper_vk,
-            &setup_tree,
-            &vars_hint,
-            &witness_hints,
-            &worker,
-            binary_commitment,
-        );
-        (risc_wrapper_proof, risc_wrapper_vk)
-    };
+//         let risc_wrapper_proof = prove_risc_wrapper(
+//             risc_wrapper_witness,
+//             &finalization_hint,
+//             &setup_base,
+//             &setup,
+//             &risc_wrapper_vk,
+//             &setup_tree,
+//             &vars_hint,
+//             &witness_hints,
+//             &worker,
+//             binary_commitment,
+//         );
+//         (risc_wrapper_proof, risc_wrapper_vk)
+//     };
 
-    let is_valid = verify_risc_wrapper_proof(&risc_wrapper_proof, &risc_wrapper_vk);
-    if !is_valid {
-        return Err("Risc wrapper proof is not valid".into());
-    }
+//     let is_valid = verify_risc_wrapper_proof(&risc_wrapper_proof, &risc_wrapper_vk);
+//     if !is_valid {
+//         return Err("Risc wrapper proof is not valid".into());
+//     }
 
-    Ok((risc_wrapper_proof, risc_wrapper_vk))
-}
+//     Ok((risc_wrapper_proof, risc_wrapper_vk))
+// }
 
-pub fn prove(
-    input: String,
-    output_dir: String,
-    trusted_setup_file: Option<String>,
-    risc_wrapper_only: bool,
-    #[cfg(feature = "gpu")] precomputations: Option<&(
-        PlonkSnarkVerifierCircuitDeviceSetupWrapper,
-        SnarkWrapperVK,
-    )>,
-    // TODO!: Remove by end of Q4 2025.
-    // Currently in place to allow a easy revert in case ZK proving causes issues.
-    use_zk: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let program_proof: crate::ProgramProof = deserialize_from_file(&input);
-    let (risc_wrapper_proof, risc_wrapper_vk) = prove_fri_risc_wrapper(program_proof).unwrap();
+// pub fn prove(
+//     input: String,
+//     output_dir: String,
+//     trusted_setup_file: Option<String>,
+//     risc_wrapper_only: bool,
+//     #[cfg(feature = "gpu")] precomputations: Option<&(
+//         PlonkSnarkVerifierCircuitDeviceSetupWrapper,
+//         SnarkWrapperVK,
+//     )>,
+//     // TODO!: Remove by end of Q4 2025.
+//     // Currently in place to allow a easy revert in case ZK proving causes issues.
+//     use_zk: bool,
+// ) -> Result<(), Box<dyn std::error::Error>> {
+//     let program_proof: crate::ProgramProof = deserialize_from_file(&input);
+//     let (risc_wrapper_proof, risc_wrapper_vk) = prove_fri_risc_wrapper(program_proof).unwrap();
 
-    if risc_wrapper_only {
-        serialize_to_file(
-            &risc_wrapper_vk,
-            &Path::new(&output_dir.clone()).join("risc_wrapper_vk.json"),
-        );
-        serialize_to_file(
-            &risc_wrapper_proof,
-            &Path::new(&output_dir.clone()).join("risc_wrapper_proof.json"),
-        );
-        return Ok(());
-    }
+//     if risc_wrapper_only {
+//         serialize_to_file(
+//             &risc_wrapper_vk,
+//             &Path::new(&output_dir.clone()).join("risc_wrapper_vk.json"),
+//         );
+//         serialize_to_file(
+//             &risc_wrapper_proof,
+//             &Path::new(&output_dir.clone()).join("risc_wrapper_proof.json"),
+//         );
+//         return Ok(());
+//     }
 
-    let (snark_wrapper_proof, snark_wrapper_vk) = prove_risc_wrapper_with_snark(
-        risc_wrapper_proof,
-        risc_wrapper_vk,
-        trusted_setup_file.clone(),
-        #[cfg(feature = "gpu")]
-        precomputations,
-        use_zk,
-    )
-    .unwrap();
+//     let (snark_wrapper_proof, snark_wrapper_vk) = prove_risc_wrapper_with_snark(
+//         risc_wrapper_proof,
+//         risc_wrapper_vk,
+//         trusted_setup_file.clone(),
+//         #[cfg(feature = "gpu")]
+//         precomputations,
+//         use_zk,
+//     )
+//     .unwrap();
 
-    serialize_to_file(
-        &snark_wrapper_proof,
-        &Path::new(&output_dir.clone()).join("snark_proof.json"),
-    );
-    serialize_to_file(
-        &snark_wrapper_vk,
-        &Path::new(&output_dir.clone()).join("snark_vk.json"),
-    );
+//     serialize_to_file(
+//         &snark_wrapper_proof,
+//         &Path::new(&output_dir.clone()).join("snark_proof.json"),
+//     );
+//     serialize_to_file(
+//         &snark_wrapper_vk,
+//         &Path::new(&output_dir.clone()).join("snark_vk.json"),
+//     );
 
-    Ok(())
-}
+//     Ok(())
+// }
 
-pub fn generate_and_save_risc_wrapper_vk(
-    input_binary: String,
-    output_dir: String,
-    universal_verifier: bool,
-    recursion_mode: RecursionStrategy,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let boojum_worker = BoojumWorker::new();
-    let risc_wrapper_vk = generate_risk_wrapper_vk(
-        Some(input_binary),
-        universal_verifier,
-        recursion_mode,
-        &boojum_worker,
-    )?;
+// pub fn generate_and_save_risc_wrapper_vk(
+//     input_binary: String,
+//     output_dir: String,
+//     universal_verifier: bool,
+//     recursion_mode: RecursionStrategy,
+// ) -> Result<(), Box<dyn std::error::Error>> {
+//     let boojum_worker = BoojumWorker::new();
+//     let risc_wrapper_vk = generate_risk_wrapper_vk(
+//         Some(input_binary),
+//         universal_verifier,
+//         recursion_mode,
+//         &boojum_worker,
+//     )?;
 
-    serialize_to_file(
-        &risc_wrapper_vk,
-        &Path::new(&output_dir.clone()).join("risc_wrapper_vk_expected.json"),
-    );
-    Ok(())
-}
+//     serialize_to_file(
+//         &risc_wrapper_vk,
+//         &Path::new(&output_dir.clone()).join("risc_wrapper_vk_expected.json"),
+//     );
+//     Ok(())
+// }
 
-pub fn generate_risk_wrapper_vk(
-    input_binary: Option<String>,
-    universal_verifier: bool,
-    recursion_mode: RecursionStrategy,
-    boojum_worker: &Worker,
-) -> Result<RiscWrapperVK, Box<dyn std::error::Error>> {
-    #[cfg(feature = "wrap_final_machine")]
-    assert!(recursion_mode.use_final_machine());
-    #[cfg(feature = "wrap_with_reduced_log_23")]
-    assert!(!recursion_mode.use_final_machine());
+// pub fn generate_risk_wrapper_vk(
+//     input_binary: Option<String>,
+//     universal_verifier: bool,
+//     recursion_mode: RecursionStrategy,
+//     boojum_worker: &Worker,
+// ) -> Result<RiscWrapperVK, Box<dyn std::error::Error>> {
+//     let bin = std::fs::read(input_binary.unwrap()).unwrap();
 
-    let bin = std::fs::read(input_binary.unwrap()).unwrap();
+//     let (end_params, aux_params) =
+//         generate_constants_for_binary(&bin, recursion_mode, universal_verifier, true);
 
-    let (end_params, aux_params) =
-        generate_constants_for_binary(&bin, recursion_mode, universal_verifier, true);
+//     let binary_commitment = BinaryCommitment {
+//         end_params,
+//         aux_params,
+//     };
 
-    let binary_commitment = BinaryCommitment {
-        end_params,
-        aux_params,
-    };
+//     #[cfg(feature = "gpu")]
+//     let (_, risc_wrapper_vk, _) =
+//         crate::gpu::risc_wrapper::get_risc_wrapper_setup(boojum_worker, binary_commitment);
 
-    #[cfg(feature = "gpu")]
-    let (_, risc_wrapper_vk, _) =
-        crate::gpu::risc_wrapper::get_risc_wrapper_setup(boojum_worker, binary_commitment);
+//     #[cfg(not(feature = "gpu"))]
+//     let (_, _, _, risc_wrapper_vk, _, _, _) =
+//         get_risc_wrapper_setup(boojum_worker, binary_commitment);
+//     Ok(risc_wrapper_vk)
+// }
 
-    #[cfg(not(feature = "gpu"))]
-    let (_, _, _, risc_wrapper_vk, _, _, _) =
-        get_risc_wrapper_setup(boojum_worker, binary_commitment);
-    Ok(risc_wrapper_vk)
-}
+// pub fn generate_vk(
+//     input_binary: Option<String>,
+//     output_dir: String,
+//     trusted_setup_file: Option<String>,
+//     universal_verifier: bool,
+//     recursion_mode: RecursionStrategy,
+// ) -> Result<H256, Box<dyn std::error::Error>> {
+//     let boojum_worker = boojum::worker::Worker::new();
 
-pub fn generate_vk(
-    input_binary: Option<String>,
-    output_dir: String,
-    trusted_setup_file: Option<String>,
-    universal_verifier: bool,
-    recursion_mode: RecursionStrategy,
-) -> Result<H256, Box<dyn std::error::Error>> {
-    let boojum_worker = boojum::worker::Worker::new();
+//     println!("=== Phase 1: Creating the Risc wrapper key");
 
-    println!("=== Phase 1: Creating the Risc wrapper key");
+//     let risc_wrapper_vk = generate_risk_wrapper_vk(
+//         input_binary,
+//         universal_verifier,
+//         recursion_mode,
+//         &boojum_worker,
+//     )?;
 
-    let risc_wrapper_vk = generate_risk_wrapper_vk(
-        input_binary,
-        universal_verifier,
-        recursion_mode,
-        &boojum_worker,
-    )?;
+//     println!("=== Phase 2: Creating the Compression key");
+//     let (_, _, _, compression_vk, _, _, _) =
+//         get_compression_setup(risc_wrapper_vk.clone(), &boojum_worker);
 
-    println!("=== Phase 2: Creating the Compression key");
-    let (_, _, _, compression_vk, _, _, _) =
-        get_compression_setup(risc_wrapper_vk.clone(), &boojum_worker);
+//     println!("=== Phase 3: Creating the SNARK key");
 
-    println!("=== Phase 3: Creating the SNARK key");
+//     #[cfg(feature = "gpu")]
+//     let snark_wrapper_vk = {
+//         println!("Using GPU for SNARK key generation");
+//         let crs_file =
+//             trusted_setup_file.expect("Trusted setup must be set for GPU (and it must be compat");
+//         let (preprocessing, snark_wrapper_vk) =
+//             crate::gpu::snark::gpu_create_snark_setup_data(&compression_vk, &crs_file);
 
-    #[cfg(feature = "gpu")]
-    let snark_wrapper_vk = {
-        println!("Using GPU for SNARK key generation");
-        let crs_file =
-            trusted_setup_file.expect("Trusted setup must be set for GPU (and it must be compat");
-        let (preprocessing, snark_wrapper_vk) =
-            crate::gpu::snark::gpu_create_snark_setup_data(&compression_vk, &crs_file);
+//         let output_file = Path::new(&output_dir).join("snark_preprocessing.bin");
+//         let file = std::fs::File::create(output_file).unwrap();
+//         preprocessing.write_into_buffer(file).unwrap();
 
-        let output_file = Path::new(&output_dir).join("snark_preprocessing.bin");
-        let file = std::fs::File::create(output_file).unwrap();
-        preprocessing.write_into_buffer(file).unwrap();
+//         snark_wrapper_vk
+//     };
+//     #[cfg(not(feature = "gpu"))]
+//     let snark_wrapper_vk = {
+//         let worker = BellmanWorker::new();
 
-        snark_wrapper_vk
-    };
-    #[cfg(not(feature = "gpu"))]
-    let snark_wrapper_vk = {
-        let worker = BellmanWorker::new();
+//         let crs_mons = match trusted_setup_file {
+//             Some(ref crs_file_str) => get_trusted_setup(crs_file_str),
+//             None => Crs::<Bn256, CrsForMonomialForm>::crs_42(
+//                 1 << L1_VERIFIER_DOMAIN_SIZE_LOG,
+//                 &BellmanWorker::new(),
+//             ),
+//         };
 
-        let crs_mons = match trusted_setup_file {
-            Some(ref crs_file_str) => get_trusted_setup(crs_file_str),
-            None => Crs::<Bn256, CrsForMonomialForm>::crs_42(
-                1 << L1_VERIFIER_DOMAIN_SIZE_LOG,
-                &BellmanWorker::new(),
-            ),
-        };
+//         let (_, snark_wrapper_vk) =
+//             get_snark_wrapper_setup(compression_vk.clone(), &crs_mons, &worker);
+//         snark_wrapper_vk
+//     };
 
-        let (_, snark_wrapper_vk) =
-            get_snark_wrapper_setup(compression_vk.clone(), &crs_mons, &worker);
-        snark_wrapper_vk
-    };
+//     serialize_to_file(
+//         &snark_wrapper_vk,
+//         &Path::new(&output_dir.clone()).join("snark_vk_expected.json"),
+//     );
 
-    serialize_to_file(
-        &snark_wrapper_vk,
-        &Path::new(&output_dir.clone()).join("snark_vk_expected.json"),
-    );
+//     let verification_key = calculate_verification_key_hash(snark_wrapper_vk);
+//     println!("VK key hash: {verification_key:?}");
 
-    let verification_key = calculate_verification_key_hash(snark_wrapper_vk);
-    println!("VK key hash: {verification_key:?}");
-
-    Ok(verification_key)
-}
+//     Ok(verification_key)
+// }
 
 pub fn verification_hash(vk_path: String) {
     let vk = deserialize_from_file(&vk_path);
