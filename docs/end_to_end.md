@@ -1,78 +1,152 @@
 # Running end to end wrapper
 
-Firstly, you should get these three files:
+## Prerequisites
 
-- base_app.bin - file that contains your base program in binary format
-- risc_proof.json - file that contains the proof of the last airbender circuit (use airbender cli to generate it)
-- setup.key - file that contains the trusted setup for the final Snark (see [Crs](./overview.md##Crs) section)
+You need up to three files depending on the command:
 
-## Running wrapper
+- **risc_proof.json** - the final program proof from airbender (`UnrolledProgramProof`), generated with `--until final-proof`
+- **setup.key** - trusted setup (CRS) file for the final SNARK (see [CRS](./overview.md##Crs) section). Only needed for SNARK-related commands.
+- **app.bin / app.text** *(optional)* - RISC-V binary and text sections. If omitted, the default unified recursion verifier binary is used.
 
-Now you can generate the RiscWrapper proof and VK with the following command:
+## CLI overview
+
+```
+wrapper [OPTIONS] <COMMAND>
+
+Commands:
+  prove-all           Full pipeline: FRI proof -> SNARK proof (phases 1+2+3)
+  prove-risc-wrapper  Phase 1: Wrap FRI proof into a boojum STARK proof
+  prove-compression   Phase 2: Compress a STARK wrapper proof
+  prove-snark         Phase 3: Wrap compressed STARK proof into a BN256 SNARK
+  generate-vk         Generate verification keys without a proof
+  vk-hash             Compute the Keccak256 hash of a SNARK verification key
+  verify              Verify a proof at any pipeline stage
+
+Options:
+  --threads <N>       Number of worker threads (defaults to all available cores)
+```
+
+## Running the full pipeline
+
+Generate a SNARK proof from an airbender FRI proof in one step:
 
 ```bash
-cargo run --bin wrapper --release -- prove-risc-wrapper --input {path to risc_proof.json} --output-dir {output directory}
+RUST_MIN_STACK=67108864 cargo +nightly run --bin wrapper --release -- \
+  prove-all \
+  --proof path/to/risc_proof.json \
+  --output-dir /tmp/snark_output \
+  --trusted-setup path/to/setup.key
 ```
 
-Also you can run the full pipeline (risc_wrapper + compression + snark_wrapper) with the following command:
+This runs all three phases sequentially (RISC wrapper, compression, SNARK wrapper) and outputs `snark_proof.json` and `snark_vk.json`.
+
+Use `--save-intermediates` to also save the RISC wrapper and compression outputs.
+
+Use `--use-zk` to enable zero-knowledge padding in the SNARK phase.
+
+**Note:** if `--trusted-setup` is omitted, the wrapper uses a fake trusted setup (`crs_42`), which **must not** be used for production but can be used for local testing.
+
+## Running individual phases
+
+### Phase 1: RISC wrapper (FRI -> STARK)
 
 ```bash
-cargo run --bin wrapper --release -- prove-full --input {path to risc_proof.json} --trusted-setup-file {path to setup.key} --output-dir {output directory}
+RUST_MIN_STACK=67108864 cargo +nightly run --bin wrapper --release -- \
+  prove-risc-wrapper \
+  --proof path/to/risc_proof.json \
+  --output-dir /tmp/phase1_output
 ```
 
-**Note:** if `--trusted-setup-file` is missing wrapper will use the fake trusted setup, which **must not** be used for production cases, but can be used **only** for local testing.
+Outputs `risc_wrapper_proof.json` and `risc_wrapper_vk.json`.
 
-### Generating final Snark VK
-
-With this command you can generate the RiscWrapper VK:
+To use a custom binary instead of the default recursion verifier:
 
 ```bash
-cargo run --bin wrapper --release -- generate-risc-wrapper-vk --input-binary {path to base_app.bin} --output-dir {output directory}
+RUST_MIN_STACK=67108864 cargo +nightly run --bin wrapper --release -- \
+  prove-risc-wrapper \
+  --proof path/to/risc_proof.json \
+  --bin path/to/app.bin \
+  --text path/to/app.text \
+  --output-dir /tmp/phase1_output
 ```
 
-To generate the final Snark VK you can use the following command:
+### Phase 2: Compression (STARK -> STARK)
 
 ```bash
-cargo run --bin wrapper --release -- generate-snark-vk --input-binary {path to base_app.bin} --trusted-setup-file {path to setup.key} --output-dir {output directory}
+RUST_MIN_STACK=67108864 cargo +nightly run --bin wrapper --release -- \
+  prove-compression \
+  --risc-wrapper-proof /tmp/phase1_output/risc_wrapper_proof.json \
+  --risc-wrapper-vk /tmp/phase1_output/risc_wrapper_vk.json \
+  --output-dir /tmp/phase2_output
 ```
 
-Generated VK can be put into the solidity code.
-Or you can use era-boojum-verifier-cli tool to verify the proofs manually.
+Outputs `compression_proof.json` and `compression_vk.json`.
 
-**Note:** there are two versions of verifier programs set you can use for recursion: common or universal. See [execution_utils](https://github.com/matter-labs/zksync-airbender/blob/6a49503916f046d091e1f7134d80fe037ace8ec6/execution_utils/src/lib.rs#L29C1-L49C72). To activate universal verifier, you should add `--universal-verifier` flag to the VK generation commands above. Proving commands can identify used type from `risc_proof.json`, so you only need to specify it during VK generation.
-
-### Regenerating wrapper
-
-If you need to regenerate the wrapper, due to changes in the last airbender recursion circuit you can use the following command:
+### Phase 3: SNARK wrapper (STARK -> BN256 SNARK)
 
 ```bash
-cargo run --bin wrapper_generator --release
+RUST_MIN_STACK=67108864 cargo +nightly run --bin wrapper --release -- \
+  prove-snark \
+  --compression-proof /tmp/phase2_output/compression_proof.json \
+  --compression-vk /tmp/phase2_output/compression_vk.json \
+  --trusted-setup path/to/setup.key \
+  --output-dir /tmp/phase3_output
 ```
 
-## GPU
+Outputs `snark_proof.json` and `snark_vk.json`, and prints the VK hash.
 
-To use gpu, you must:
+## Generating verification keys
 
-- compile with gpu feature flag
-- install BELLMAN_CUDA (and set BELLMAN_CUDA_DIR=)
-- download the compact [CRS file](https://storage.googleapis.com/matterlabs-setup-keys-us/setup-keys/setup_compact.key) (4GB)
+Generate all verification keys (RISC wrapper, compression, SNARK) without needing a proof:
 
-For example, you can snark-wrap the airbender risk program proof:
-
-```shell
-time CUDA_VISIBLE_DEVICES=0 RUST_BACKTRACE=1 RUST_MIN_STACK=267108864 cargo run --bin wrapper --release --features gpu  prove-full --input wrapper/testing_data/risc_proof --trusted-setup-file crs/setup_compact.key  --output-dir /tmp/snark_output
+```bash
+RUST_MIN_STACK=67108864 cargo +nightly run --bin wrapper --release -- \
+  generate-vk \
+  --trusted-setup path/to/setup.key \
+  --output-dir /tmp/vk_output
 ```
 
-You can also pre-generate VKs & computations, that will later speed up your proving:
+Outputs `risc_wrapper_vk.json`, `compression_vk.json`, and `snark_vk.json`.
 
-```shell
-CUDA_VISIBLE_DEVICES=0 RUST_BACKTRACE=1 RUST_MIN_STACK=267108864 cargo run --bin wrapper --release  generate-snark-vk  --trusted-setup-file crs/setup_compact.key --output-dir /tmp/precomputations
+To generate VKs for a custom binary:
+
+```bash
+RUST_MIN_STACK=67108864 cargo +nightly run --bin wrapper --release -- \
+  generate-vk \
+  --bin path/to/app.bin \
+  --text path/to/app.text \
+  --trusted-setup path/to/setup.key \
+  --output-dir /tmp/vk_output
 ```
 
-Precomputations take around 7GB.
+## Computing VK hash
 
-And then you use them by setting `precomputation-dir` flag:
+Get the Keccak256 hash of a SNARK VK for use in Ethereum contracts:
 
-```shell
-time CUDA_VISIBLE_DEVICES=0 RUST_BACKTRACE=1 RUST_MIN_STACK=267108864 cargo run --bin wrapper --release --features gpu  prove-full --input wrapper/testing_data/risc_proof --trusted-setup-file crs/setup_compact.key  --precomputation-dir /tmp/preprocessing --output-dir /tmp/snark_output
+```bash
+cargo +nightly run --bin wrapper --release -- \
+  vk-hash --vk path/to/snark_vk.json
 ```
+
+## Verifying proofs
+
+Verify a proof at any stage:
+
+```bash
+cargo +nightly run --bin wrapper --release -- \
+  verify --stage risc-wrapper \
+  --proof path/to/risc_wrapper_proof.json \
+  --vk path/to/risc_wrapper_vk.json
+```
+
+Supported `--stage` values: `risc-wrapper`, `compression`, `snark`.
+
+## Regenerating wrapper
+
+If you need to regenerate the wrapper due to changes in the airbender recursion circuit:
+
+```bash
+cargo +nightly run --bin wrapper_generator --release
+```
+
+<!-- TODO: GPU section -->
