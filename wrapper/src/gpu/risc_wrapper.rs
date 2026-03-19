@@ -44,10 +44,11 @@ pub fn get_risc_wrapper_setup(
     let geometry = RiscWrapper::geometry();
     let (max_trace_len, num_vars) = circuit.size_hint();
 
-    let builder_impl = CsReferenceImplementationBuilder::<GL, GL, SetupCSConfig, StCircuitResolver>::new(
-        geometry,
-        max_trace_len.unwrap(),
-    );
+    let builder_impl =
+        CsReferenceImplementationBuilder::<GL, GL, SetupCSConfig, StCircuitResolver>::new(
+            geometry,
+            max_trace_len.unwrap(),
+        );
     let builder = new_builder::<_, GL>(builder_impl);
 
     let builder = RiscWrapper::configure_builder(builder);
@@ -107,10 +108,11 @@ pub fn prove_risc_wrapper(
     let geometry = RiscWrapper::geometry();
     let (max_trace_len, num_vars) = circuit.size_hint();
 
-    let builder_impl = CsReferenceImplementationBuilder::<GL, GL, ProvingCSConfig, StCircuitResolver>::new(
-        geometry,
-        max_trace_len.unwrap(),
-    );
+    let builder_impl =
+        CsReferenceImplementationBuilder::<GL, GL, ProvingCSConfig, StCircuitResolver>::new(
+            geometry,
+            max_trace_len.unwrap(),
+        );
     let builder = new_builder::<_, GL>(builder_impl);
 
     let builder = RiscWrapper::configure_builder(builder);

@@ -8,9 +8,9 @@ use bellman::kate_commitment::{Crs, CrsForMonomialForm};
 use bellman::worker::Worker as BellmanWorker;
 
 use zkos_wrapper::{
-    Bn256, L1_VERIFIER_DOMAIN_SIZE_LOG,
-    calculate_verification_key_hash, deserialize_from_file, get_trusted_setup, serialize_to_file,
+    Bn256, L1_VERIFIER_DOMAIN_SIZE_LOG, calculate_verification_key_hash,
     circuits::{BinaryCommitment, RiscWrapperWitness},
+    deserialize_from_file, get_trusted_setup, serialize_to_file,
 };
 
 #[derive(Parser)]
@@ -223,7 +223,9 @@ fn load_crs(trusted_setup: &Option<PathBuf>) -> Crs<Bn256, CrsForMonomialForm> {
             get_trusted_setup(&path.to_string_lossy().to_string())
         }
         None => {
-            println!("WARNING: Using fake crs_42 trusted setup (testing only, NOT for production!)");
+            println!(
+                "WARNING: Using fake crs_42 trusted setup (testing only, NOT for production!)"
+            );
             Crs::<Bn256, CrsForMonomialForm>::crs_42(
                 1 << L1_VERIFIER_DOMAIN_SIZE_LOG,
                 &BellmanWorker::new(),
@@ -245,10 +247,8 @@ fn run_phase1_risc_wrapper(
     bin: &Option<PathBuf>,
     text: &Option<PathBuf>,
     worker: &boojum::worker::Worker,
-) -> Result<
-    (zkos_wrapper::RiscWrapperProof, zkos_wrapper::RiscWrapperVK),
-    Box<dyn std::error::Error>,
-> {
+) -> Result<(zkos_wrapper::RiscWrapperProof, zkos_wrapper::RiscWrapperVK), Box<dyn std::error::Error>>
+{
     let binary_commitment = timed("Phase 1 - binary commitment", || {
         load_binary_commitment(bin, text)
     })?;
@@ -261,10 +261,17 @@ fn run_phase1_risc_wrapper(
         RiscWrapperWitness::from_full_proof(program_proof, &binary_commitment)
     });
 
-    let (finalization_hint, setup_base, setup, risc_wrapper_vk, setup_tree, vars_hint, witness_hints) =
-        timed("Phase 1 - setup", || {
-            zkos_wrapper::get_risc_wrapper_setup(worker, binary_commitment)
-        });
+    let (
+        finalization_hint,
+        setup_base,
+        setup,
+        risc_wrapper_vk,
+        setup_tree,
+        vars_hint,
+        witness_hints,
+    ) = timed("Phase 1 - setup", || {
+        zkos_wrapper::get_risc_wrapper_setup(worker, binary_commitment)
+    });
 
     let risc_wrapper_proof = timed("Phase 1 - prove", || {
         zkos_wrapper::prove_risc_wrapper(
@@ -296,14 +303,19 @@ fn run_phase2_compression(
     risc_wrapper_proof: zkos_wrapper::RiscWrapperProof,
     risc_wrapper_vk: zkos_wrapper::RiscWrapperVK,
     worker: &boojum::worker::Worker,
-) -> Result<
-    (zkos_wrapper::CompressionProof, zkos_wrapper::CompressionVK),
-    Box<dyn std::error::Error>,
-> {
-    let (finalization_hint, setup_base, setup, compression_vk, setup_tree, vars_hint, witness_hints) =
-        timed("Phase 2 - setup", || {
-            zkos_wrapper::get_compression_setup(risc_wrapper_vk.clone(), worker)
-        });
+) -> Result<(zkos_wrapper::CompressionProof, zkos_wrapper::CompressionVK), Box<dyn std::error::Error>>
+{
+    let (
+        finalization_hint,
+        setup_base,
+        setup,
+        compression_vk,
+        setup_tree,
+        vars_hint,
+        witness_hints,
+    ) = timed("Phase 2 - setup", || {
+        zkos_wrapper::get_compression_setup(risc_wrapper_vk.clone(), worker)
+    });
 
     let compression_proof = timed("Phase 2 - prove", || {
         zkos_wrapper::prove_compression(
@@ -337,7 +349,10 @@ fn run_phase3_snark(
     trusted_setup: &Option<PathBuf>,
     use_zk: bool,
 ) -> Result<
-    (zkos_wrapper::SnarkWrapperProof, zkos_wrapper::SnarkWrapperVK),
+    (
+        zkos_wrapper::SnarkWrapperProof,
+        zkos_wrapper::SnarkWrapperVK,
+    ),
     Box<dyn std::error::Error>,
 > {
     let crs_mons = timed("Phase 3 - load CRS", || load_crs(trusted_setup));
@@ -393,8 +408,14 @@ fn cmd_prove_all(
         run_phase1_risc_wrapper(&proof, &bin, &text, &worker)?;
 
     if save_intermediates {
-        serialize_to_file(&risc_wrapper_proof, &output_path(&output_dir, "risc_wrapper_proof.json"));
-        serialize_to_file(&risc_wrapper_vk, &output_path(&output_dir, "risc_wrapper_vk.json"));
+        serialize_to_file(
+            &risc_wrapper_proof,
+            &output_path(&output_dir, "risc_wrapper_proof.json"),
+        );
+        serialize_to_file(
+            &risc_wrapper_vk,
+            &output_path(&output_dir, "risc_wrapper_vk.json"),
+        );
         println!("Saved intermediate Phase 1 outputs");
     }
 
@@ -403,8 +424,14 @@ fn cmd_prove_all(
         run_phase2_compression(risc_wrapper_proof, risc_wrapper_vk, &worker)?;
 
     if save_intermediates {
-        serialize_to_file(&compression_proof, &output_path(&output_dir, "compression_proof.json"));
-        serialize_to_file(&compression_vk, &output_path(&output_dir, "compression_vk.json"));
+        serialize_to_file(
+            &compression_proof,
+            &output_path(&output_dir, "compression_proof.json"),
+        );
+        serialize_to_file(
+            &compression_vk,
+            &output_path(&output_dir, "compression_vk.json"),
+        );
         println!("Saved intermediate Phase 2 outputs");
     }
 
@@ -419,7 +446,10 @@ fn cmd_prove_all(
     println!("SNARK VK hash: {vk_hash:?}");
 
     let total_elapsed = total_start.elapsed();
-    println!("=== Total pipeline time: {:.1}s", total_elapsed.as_secs_f64());
+    println!(
+        "=== Total pipeline time: {:.1}s",
+        total_elapsed.as_secs_f64()
+    );
 
     Ok(())
 }
@@ -437,8 +467,14 @@ fn cmd_prove_risc_wrapper(
     let (risc_wrapper_proof, risc_wrapper_vk) =
         run_phase1_risc_wrapper(&proof, &bin, &text, &worker)?;
 
-    serialize_to_file(&risc_wrapper_proof, &output_path(&output_dir, "risc_wrapper_proof.json"));
-    serialize_to_file(&risc_wrapper_vk, &output_path(&output_dir, "risc_wrapper_vk.json"));
+    serialize_to_file(
+        &risc_wrapper_proof,
+        &output_path(&output_dir, "risc_wrapper_proof.json"),
+    );
+    serialize_to_file(
+        &risc_wrapper_vk,
+        &output_path(&output_dir, "risc_wrapper_vk.json"),
+    );
 
     Ok(())
 }
@@ -452,16 +488,28 @@ fn cmd_prove_compression(
     ensure_output_dir(&output_dir)?;
     let worker = create_boojum_worker(threads);
 
-    println!("Loading RISC wrapper proof from {}", risc_wrapper_proof_path.display());
+    println!(
+        "Loading RISC wrapper proof from {}",
+        risc_wrapper_proof_path.display()
+    );
     let risc_wrapper_proof = deserialize_from_file(risc_wrapper_proof_path.to_str().unwrap());
-    println!("Loading RISC wrapper VK from {}", risc_wrapper_vk_path.display());
+    println!(
+        "Loading RISC wrapper VK from {}",
+        risc_wrapper_vk_path.display()
+    );
     let risc_wrapper_vk = deserialize_from_file(risc_wrapper_vk_path.to_str().unwrap());
 
     let (compression_proof, compression_vk) =
         run_phase2_compression(risc_wrapper_proof, risc_wrapper_vk, &worker)?;
 
-    serialize_to_file(&compression_proof, &output_path(&output_dir, "compression_proof.json"));
-    serialize_to_file(&compression_vk, &output_path(&output_dir, "compression_vk.json"));
+    serialize_to_file(
+        &compression_proof,
+        &output_path(&output_dir, "compression_proof.json"),
+    );
+    serialize_to_file(
+        &compression_vk,
+        &output_path(&output_dir, "compression_vk.json"),
+    );
 
     Ok(())
 }
@@ -475,9 +523,15 @@ fn cmd_prove_snark(
 ) -> Result<(), Box<dyn std::error::Error>> {
     ensure_output_dir(&output_dir)?;
 
-    println!("Loading compression proof from {}", compression_proof_path.display());
+    println!(
+        "Loading compression proof from {}",
+        compression_proof_path.display()
+    );
     let compression_proof = deserialize_from_file(compression_proof_path.to_str().unwrap());
-    println!("Loading compression VK from {}", compression_vk_path.display());
+    println!(
+        "Loading compression VK from {}",
+        compression_vk_path.display()
+    );
     let compression_vk = deserialize_from_file(compression_vk_path.to_str().unwrap());
 
     let (snark_proof, snark_vk) =
@@ -507,17 +561,24 @@ fn cmd_generate_vk(
         load_binary_commitment(&bin, &text)
     })?;
 
-    let (_, _, _, risc_wrapper_vk, _, _, _) = timed("VK generation - Phase 1 (RISC wrapper)", || {
-        zkos_wrapper::get_risc_wrapper_setup(&worker, binary_commitment)
-    });
-    serialize_to_file(&risc_wrapper_vk, &output_path(&output_dir, "risc_wrapper_vk.json"));
+    let (_, _, _, risc_wrapper_vk, _, _, _) =
+        timed("VK generation - Phase 1 (RISC wrapper)", || {
+            zkos_wrapper::get_risc_wrapper_setup(&worker, binary_commitment)
+        });
+    serialize_to_file(
+        &risc_wrapper_vk,
+        &output_path(&output_dir, "risc_wrapper_vk.json"),
+    );
     println!("Saved risc_wrapper_vk.json");
 
     // Phase 2: Compression VK
     let (_, _, _, compression_vk, _, _, _) = timed("VK generation - Phase 2 (compression)", || {
         zkos_wrapper::get_compression_setup(risc_wrapper_vk, &worker)
     });
-    serialize_to_file(&compression_vk, &output_path(&output_dir, "compression_vk.json"));
+    serialize_to_file(
+        &compression_vk,
+        &output_path(&output_dir, "compression_vk.json"),
+    );
     println!("Saved compression_vk.json");
 
     // Phase 3: SNARK VK
@@ -597,7 +658,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             trusted_setup,
             use_zk,
             save_intermediates,
-        } => cmd_prove_all(proof, bin, text, output_dir, trusted_setup, use_zk, save_intermediates, cli.threads),
+        } => cmd_prove_all(
+            proof,
+            bin,
+            text,
+            output_dir,
+            trusted_setup,
+            use_zk,
+            save_intermediates,
+            cli.threads,
+        ),
 
         Commands::ProveRiscWrapper {
             proof,
@@ -618,7 +688,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             output_dir,
             trusted_setup,
             use_zk,
-        } => cmd_prove_snark(compression_proof, compression_vk, output_dir, trusted_setup, use_zk),
+        } => cmd_prove_snark(
+            compression_proof,
+            compression_vk,
+            output_dir,
+            trusted_setup,
+            use_zk,
+        ),
 
         Commands::GenerateVk {
             output_dir,
