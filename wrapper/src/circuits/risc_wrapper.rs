@@ -39,7 +39,7 @@ use risc_verifier::blake2s_u32::*;
 use risc_verifier::concrete::size_constants::*;
 use risc_verifier::prover::definitions::LeafInclusionVerifier;
 use risc_verifier::prover::field::Mersenne31Field;
-use risc_verifier::prover::risc_v_simulator::cycle::state::NUM_REGISTERS;
+use risc_verifier::prover::riscv_transpiler::cycle::state::NUM_REGISTERS;
 
 use risc_verifier::prover::cs::definitions::*;
 
@@ -82,8 +82,8 @@ impl BinaryCommitment {
         // We expect to verify an unified_reduced_machine
 
         Self::from_binary(
-            execution_utils::RECURSION_UNIFIED_BIN,
-            execution_utils::RECURSION_UNIFIED_TXT,
+            execution_utils::verifier_binaries::RECURSION_UNIFIED_BIN,
+            execution_utils::verifier_binaries::RECURSION_UNIFIED_TXT,
         )
     }
 
@@ -91,7 +91,7 @@ impl BinaryCommitment {
         binary: &[u8],
         text: &[u8],
     ) -> Self {
-        use risc_verifier::prover::risc_v_simulator::cycle::IWithoutByteAccessIsaConfigWithDelegation;
+        use risc_verifier::prover::riscv_transpiler::cycle::IWithoutByteAccessIsaConfigWithDelegation;
         use execution_utils::unified_circuit::compute_unified_setup_for_machine_configuration;
 
         let mut padded_binary = binary.to_vec();
